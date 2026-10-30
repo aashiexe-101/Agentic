@@ -139,9 +139,10 @@ def make_empty_array() -> np.ndarray:
 # =============================================================================
 
 REQUIRED_TOP_KEYS = {
-    "schema_version", "asymmetry", "border_irregularity",
-    "colour_variegation", "structural_features",
-    "suspicion_score", "reliability", "segmentation", "limitations",
+    "schema_version", "reliable", "error", "features", "evidence", "flags",
+    "asymmetry", "border_irregularity", "colour_variegation",
+    "structural_features", "suspicion_score", "reliability",
+    "segmentation", "limitations",
 }
 
 ASYMMETRY_KEYS = {"value", "reliable", "method"}
@@ -161,6 +162,25 @@ def assert_schema(result: dict, label: str = "") -> None:
 
     assert result["schema_version"] == SCHEMA_VERSION, \
         f"{prefix}schema_version mismatch"
+
+    # Contract alias invariants
+    assert isinstance(result["reliable"], bool), f"{prefix}reliable must be bool"
+    assert result["error"] is None or isinstance(result["error"], str), \
+        f"{prefix}error must be str or None"
+    assert isinstance(result["features"], list), f"{prefix}features must be list"
+    assert isinstance(result["evidence"], list), f"{prefix}evidence must be list"
+    assert isinstance(result["flags"], dict), f"{prefix}flags must be dict"
+    assert result["features"] == result["structural_features"], \
+        f"{prefix}features must alias structural_features"
+    assert result["evidence"] == result["limitations"], \
+        f"{prefix}evidence must alias limitations"
+    assert result["reliable"] == (result["reliability"] != "LOW"), \
+        f"{prefix}reliable bool must match reliability tier"
+    if not result["reliable"]:
+        assert isinstance(result["error"], str) and len(result["error"]) > 0, \
+            f"{prefix}error must be populated when reliable is False"
+    else:
+        assert result["error"] is None, f"{prefix}error must be None when reliable is True"
 
     assert isinstance(result["asymmetry"], dict), \
         f"{prefix}asymmetry must be dict"
@@ -547,6 +567,38 @@ class TestReliabilityFlags:
                                       "validated" in combined), \
             "Clinical caveat missing from limitations"
 
+    def test_a5_safety_agent_veto_compatibility(self):
+        """Asserts that on failed segmentation or corrupt input:
+        1. result.get('reliable') is False evaluates to True (triggers A5 safety veto).
+        2. result.get('error') is a non-empty string.
+        3. result.get('features') and result.get('evidence') are lists.
+        4. result.get('flags')['unreliable_morphology'] is True.
+        """
+        # Failed segmentation (tiny lesion)
+        tiny_res = analyze_lesion(make_tiny_lesion(r=3))
+        assert tiny_res.get("reliable") is False
+        assert isinstance(tiny_res.get("error"), str) and len(tiny_res["error"]) > 0
+        assert isinstance(tiny_res.get("features"), list)
+        assert isinstance(tiny_res.get("evidence"), list)
+        assert tiny_res.get("flags", {}).get("unreliable_morphology") is True
+
+        # Nonexistent path
+        bad_path_res = analyze_lesion("/nonexistent/corrupt/lesion.jpg")
+        assert bad_path_res.get("reliable") is False
+        assert isinstance(bad_path_res.get("error"), str) and len(bad_path_res["error"]) > 0
+        assert bad_path_res.get("flags", {}).get("unreliable_morphology") is True
+
+        # None input
+        none_res = analyze_lesion(None)
+        assert none_res.get("reliable") is False
+        assert isinstance(none_res.get("error"), str) and len(none_res["error"]) > 0
+
+        # Valid input: reliable is True, error is None
+        good_res = analyze_lesion(make_circular_lesion())
+        assert good_res.get("reliable") is True
+        assert good_res.get("error") is None
+        assert good_res.get("flags", {}).get("unreliable_morphology") is False
+
 
 # =============================================================================
 # Section 9 — Runtime and memory guard
@@ -622,13 +674,15 @@ class TestStructuralFeatures:
                 f"Feature '{f}' missing '_candidate' suffix"
 
     def test_uniform_dark_lesion_may_trigger_dark_network(self):
-        """A very dark uniform lesion may trigger the dark network candidate."""
+        """A very dark uniform lesion may trigger the dark network and atypical network candidates."""
         img = _blank_bgr()
         cv2.circle(img, (320, 240), 120, (20, 15, 10), -1)  # very dark lesion
         result = analyze_lesion(img)
         # We don't assert the exact feature is present (depends on segmentation),
-        # but we do assert schema stability
+        # but we do assert schema stability and atypical_network pairing if triggered
         assert_schema(result)
+        if "dark_network_candidate" in result["structural_features"]:
+            assert "atypical_network_candidate" in result["structural_features"]
 
     def test_empty_features_on_segmentation_failure(self):
         result = analyze_lesion(make_tiny_lesion(r=2))
