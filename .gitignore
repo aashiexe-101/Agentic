@@ -1,3 +1,11 @@
 .venv/
 .env
 __pycache__/
+data/
+models/
+outputs/
+*.zip
+*.npy
+*.pt
+*.pth
+*.joblib
