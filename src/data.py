@@ -43,6 +43,9 @@ except ImportError:
 PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
 
 # Canonical seven diagnostic classes (strict lowercase, alphabetical order)
+DATA_DIR: Path = PROJECT_ROOT / "data"
+
+# Canonical seven diagnostic classes (strict lowercase, alphabetical order)
 CLASS_LABELS: list[str] = [
     "akiec",  # Actinic keratoses and intraepithelial carcinoma
     "bcc",    # Basal cell carcinoma
@@ -52,6 +55,10 @@ CLASS_LABELS: list[str] = [
     "nv",     # Melanocytic nevi
     "vasc",   # Vascular lesions
 ]
+
+# Backward compatibility alias for Agent A2 and common.py
+CLASS_NAMES: list[str] = CLASS_LABELS
+
 
 LABEL_TO_IDX: dict[str, int] = {label: idx for idx, label in enumerate(CLASS_LABELS)}
 IDX_TO_LABEL: dict[int, str] = {idx: label for idx, label in enumerate(CLASS_LABELS)}
@@ -90,6 +97,32 @@ def _resolve_data_dir(data_dir: Union[str, Path] = "data") -> Path:
     if not path.is_absolute():
         path = PROJECT_ROOT / path
     return path
+
+
+def _resolve_partition_dir(resolved_data_dir: Path, split_norm: str) -> Path:
+    """Resolve physical directory for a partition, checking disk for 'eval' vs 'val'."""
+    direct = resolved_data_dir / split_norm
+    if direct.is_dir():
+        return direct
+    if split_norm in ("val", "eval"):
+        if (resolved_data_dir / "eval").is_dir():
+            return resolved_data_dir / "eval"
+        if (resolved_data_dir / "val").is_dir():
+            return resolved_data_dir / "val"
+    return direct
+
+
+def get_split_dir(split: str = "eval", data_dir: Union[str, Path] = "data") -> Path:
+    """Resolve the verified directory path for a given split ('train', 'eval', or 'val')."""
+    split_norm = _resolve_split(split)
+    resolved_data_dir = _resolve_data_dir(data_dir)
+    partition_dir = _resolve_partition_dir(resolved_data_dir, split_norm)
+    if not partition_dir.is_dir():
+        raise FileNotFoundError(
+            f"Dataset partition directory not found for split '{split}' at: {partition_dir}"
+        )
+    return partition_dir
+
 
 
 def validate_image_id(image_id: Any) -> str:
@@ -188,7 +221,8 @@ def get_image_path(
     split_norm = _resolve_split(split)
     clean_id = validate_image_id(image_id)
     resolved_data_dir = _resolve_data_dir(data_dir)
-    images_dir = (resolved_data_dir / split_norm / "images").resolve()
+    partition_dir = _resolve_partition_dir(resolved_data_dir, split_norm)
+    images_dir = (partition_dir / "images").resolve()
     image_path = (images_dir / f"{clean_id}.jpg").resolve()
 
     # Ensure resolved path remains strictly within the intended partition directory
@@ -235,8 +269,9 @@ def load_metadata(
 
     split_norm = _resolve_split(split)
     resolved_data_dir = _resolve_data_dir(data_dir)
-    csv_path = resolved_data_dir / split_norm / "metadata.csv"
-    images_dir = (resolved_data_dir / split_norm / "images").resolve()
+    partition_dir = _resolve_partition_dir(resolved_data_dir, split_norm)
+    csv_path = partition_dir / "metadata.csv"
+    images_dir = (partition_dir / "images").resolve()
 
     if not csv_path.is_file():
         raise FileNotFoundError(
@@ -414,6 +449,34 @@ def verify_split_leakage(
     }
 
 
+def load_split(
+    split: str = "eval",
+    data_dir: Union[str, Path] = "data",
+) -> list[tuple[str, Path, str]]:
+    """Compatibility wrapper for Agent A2 and validation pipeline runners.
+
+    Preserves the exact contract expected by existing callers:
+        List[Tuple[str, Path, str]]
+        where each record is (image_id, image_path, label)
+        - image_id: Unique ISIC image identifier (e.g., 'ISIC_0026769')
+        - image_path: Verified Path object to the .jpg file
+        - label: Canonical diagnostic string in CLASS_NAMES
+
+    Uses load_metadata() internally so logic is never duplicated.
+    """
+    df = load_metadata(split=split, data_dir=data_dir)
+    df_sorted = df.sort_values(by="image_id", ascending=True).reset_index(drop=True)
+
+    records: list[tuple[str, Path, str]] = []
+    for _, row in df_sorted.iterrows():
+        img_id = str(row["image_id"]).strip()
+        img_p = Path(row["image_path"])
+        label = str(row["dx"]).strip().lower()
+        records.append((img_id, img_p, label))
+
+    return records
+
+
 # -----------------------------------------------------------------------------
 # 3. DermaGuardDataset (Framework-Independent Abstraction)
 # -----------------------------------------------------------------------------
@@ -449,7 +512,8 @@ class DermaGuardDataset:
         split_norm = _resolve_split(split)
         self.split: str = split_norm
         self.data_dir: Path = _resolve_data_dir(data_dir)
-        self.images_dir: Path = (self.data_dir / split_norm / "images").resolve()
+        self.partition_dir: Path = _resolve_partition_dir(self.data_dir, split_norm)
+        self.images_dir: Path = (self.partition_dir / "images").resolve()
 
         if metadata is not None:
             self.df: pd.DataFrame = self._validate_and_prepare_metadata(metadata)

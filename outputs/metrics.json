@@ -1,61 +1,61 @@
 {
-  "accuracy": 0.7975,
-  "balanced_accuracy": 0.7995,
-  "macro_f1": 0.6428,
+  "accuracy": 0.7235,
+  "balanced_accuracy": 0.6184,
+  "macro_f1": 0.5614,
   "per_class": {
     "akiec": {
-      "precision": 0.4486,
-      "recall": 0.8,
-      "f1": 0.5749,
-      "support": 60
+      "precision": 0.4521,
+      "recall": 0.5238,
+      "f1": 0.4853,
+      "support": 63
     },
     "bcc": {
-      "precision": 0.5163,
-      "recall": 0.79,
-      "f1": 0.6245,
-      "support": 100
+      "precision": 0.4662,
+      "recall": 0.6139,
+      "f1": 0.5299,
+      "support": 101
     },
     "bkl": {
-      "precision": 0.7033,
-      "recall": 0.7864,
-      "f1": 0.7425,
-      "support": 220
+      "precision": 0.4625,
+      "recall": 0.5236,
+      "f1": 0.4912,
+      "support": 212
     },
     "df": {
-      "precision": 0.3333,
-      "recall": 0.8333,
-      "f1": 0.4762,
-      "support": 30
+      "precision": 0.3548,
+      "recall": 0.4783,
+      "f1": 0.4074,
+      "support": 23
     },
     "mel": {
-      "precision": 0.7522,
-      "recall": 0.7864,
-      "f1": 0.7689,
-      "support": 220
+      "precision": 0.3768,
+      "recall": 0.486,
+      "f1": 0.4245,
+      "support": 214
     },
     "nv": {
-      "precision": 0.9675,
-      "recall": 0.8007,
-      "f1": 0.8763,
-      "support": 1340
+      "precision": 0.9217,
+      "recall": 0.8141,
+      "f1": 0.8646,
+      "support": 1302
     },
     "vasc": {
-      "precision": 0.3,
-      "recall": 0.8,
-      "f1": 0.4364,
-      "support": 30
+      "precision": 0.6154,
+      "recall": 0.8889,
+      "f1": 0.7273,
+      "support": 27
     }
   },
   "quality_summary": {
-    "PASS": 1652,
-    "WARN": 268,
-    "FAIL": 80,
+    "PASS": 72,
+    "WARN": 654,
+    "FAIL": 1216,
     "top_reasons": [
-      "partial_hair_obstruction",
-      "slight_blur",
-      "uneven_illumination",
-      "mild_glare",
-      "severe_blur"
+      "below FAIL threshold 48.72)",
+      "above WARN threshold 4.30%)",
+      "below WARN threshold 82.15)",
+      "above FAIL threshold 10.85%)",
+      "above WARN threshold 192.35)"
     ]
   }
 }
