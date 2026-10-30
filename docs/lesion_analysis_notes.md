@@ -26,11 +26,25 @@ result = analyze_lesion(image)
 # image: str | pathlib.Path | np.ndarray (BGR or RGB)
 ```
 
-### Output Schema (v1.0)
+### Output Schema (v1.1 — Contract-Hardened & Backward-Compatible)
 
 ```python
 {
-    "schema_version": "1.0",          # bump when schema changes
+    "schema_version": "1.0",          # stable schema version
+    "reliable": bool,                 # Top-level boolean: True if reliability != "LOW", False if "LOW"
+    "error": str | None,              # Primary failure reason when unreliable, else None (triggers A5 veto)
+    "features": [str],                # Alias pointing to structural_features (Phase 2 contract)
+    "evidence": [str],                # Alias pointing to limitations (Phase 2 contract)
+    "flags": {                        # Discrete boolean flags for coordinator/auditor
+        "asymmetric": bool,
+        "irregular_border": bool,
+        "colour_variegated": bool,
+        "unreliable_morphology": bool,
+        "blue_white_veil": bool,
+        "dark_network": bool,
+        "atypical_network": bool,
+        ...
+    },
     "asymmetry": {
         "value":    float | None,     # 0=symmetric, 1=maximum asymmetry
         "reliable": bool,
@@ -52,7 +66,7 @@ result = analyze_lesion(image)
             "n_colour_clusters": int | None
         }
     },
-    "structural_features": [str],     # always end in "_candidate"
+    "structural_features": [str],     # candidate findings (e.g. "blue_white_veil_candidate")
     "suspicion_score":  float | None, # heuristic [0,1] — NOT clinical
     "reliability": "HIGH"|"MEDIUM"|"LOW",
     "segmentation": {
@@ -151,23 +165,37 @@ else:
 
 ---
 
-## 5. A6 Coordinator Contract
+## 5. Downstream Agent Integration Contracts (A5 Safety & A6 Coordinator)
 
-A3 must provide **actual evidence** to A6.  The recommended fields A6 should
-read are:
+Agent A3 output is consumed directly by Agent A5 (`src/safety_agent.py`) and Agent A6 (`src/coordinator.py`).
 
-| A3 field | A6 use |
-|---|---|
-| `reliability` | Gate whether morphology evidence is trustworthy |
-| `asymmetry["value"]` | ABCD-A feature |
-| `border_irregularity["value"]` | ABCD-B feature |
-| `colour_variegation["value"]` | ABCD-C feature |
-| `structural_features` | ABCD-D feature list |
-| `suspicion_score` | Optional aggregated signal |
-| `limitations` | Surfaced in final report caveats |
+### 5.1 Agent A5 Safety Auditor Integration
+In `src/safety_agent.py`, the clinical safety auditor inspects A3 via:
+```python
+if a3.get("reliable") is False or a3.get("error"):
+    safety_flag = True
+    veto_auto_triage = True
+    requires_human_review = True
+```
+- **Top-level `reliable: bool`:** When segmentation fails or an unreadable input is provided, A3 sets `"reliable": False`, ensuring A5's safety veto activates without exception.
+- **Top-level `error: str | None`:** Provides the primary segmentation or input error message (e.g. `"Segmentation unreliable — see limitations."`).
+- **High-Risk Feature Detection:** A5 inspects `structural_features` scanning for substrings `["blue_white", "veil", "atypical", "streak", "ulcer"]`. A3 outputs `"blue_white_veil_candidate"` and `"atypical_network_candidate"` which reliably trigger A5's red-flag and cross-agent conflict checks against benign A2 predictions.
 
-**If `reliability == "LOW"`, A6 must not use any morphology metric for
-routing decisions.**
+### 5.2 Agent A6 Coordinator Contract
+In `src/coordinator.py`, the coordinator collects evidence for reporting and audit logs:
+- **`flags`:** Returns a discrete boolean map:
+  - `asymmetric: bool` (asymmetry > 0.35)
+  - `irregular_border: bool` (irregularity > 0.35)
+  - `colour_variegated: bool` (variegation > 0.35)
+  - `unreliable_morphology: bool` (reliability == "LOW")
+  - `blue_white_veil`, `atypical_network`, `dark_network`, `regression_white`: `bool`
+- **`features` / `evidence`:** Aliases for `structural_features` and `limitations` complying with the Phase 2 Section 6 contract.
+
+**Policy Rule:** If `reliability == "LOW"`, A6 and A5 strictly veto `AUTO-TRIAGE` and route to `REFER` (or `RE-IMAGE` if A1 failed).
+
+### 5.3 Clinical Safety Disclaimer
+> ⚠️ **CRITICAL CLINICAL DISCLAIMER:**
+> `suspicion_score` and all morphological indicators are **experimental heuristic aids** derived from classical computer vision operators. They are **NOT** a clinically validated risk score, NOT an official dermatological ABCD score, and MUST NEVER be used as a standalone diagnostic determinant. All findings are labeled as candidates.
 
 ---
 

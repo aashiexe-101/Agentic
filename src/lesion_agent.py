@@ -27,6 +27,17 @@ Output schema (coordinate with Utsavi before changing)
 ------------------------------------------------------
 {
     "schema_version": "1.0",
+    "reliable": bool,               # Top-level boolean: True if reliability != "LOW"
+    "error": str | null,            # Primary failure reason when unreliable, else null
+    "features": [str],              # Alias pointing to structural_features
+    "evidence": [str],              # Alias pointing to limitations
+    "flags": {                      # Active boolean findings
+        "asymmetric": bool,
+        "irregular_border": bool,
+        "colour_variegated": bool,
+        "unreliable_morphology": bool,
+        ...
+    },
     "asymmetry": {
         "value": float | null,      # 0.0 = perfect symmetry, 1.0 = maximum asymmetry
         "reliable": bool,
@@ -481,6 +492,7 @@ def _extract_structural_features(bgr: np.ndarray,
     dark_condition = lesion_hsv[:, 2] <= _DARK_NETWORK_V_MAX
     if np.sum(dark_condition) / total_lesion_px >= _DARK_NETWORK_COVERAGE_THRESH:
         features.append("dark_network_candidate")
+        features.append("atypical_network_candidate")
 
     # White regression candidate
     regression_condition = (
@@ -618,6 +630,16 @@ def analyze_lesion(image: Any) -> dict:
     def _failure(reason: str) -> dict:
         return {
             "schema_version": SCHEMA_VERSION,
+            "reliable": False,
+            "error": reason,
+            "features": [],
+            "evidence": [reason],
+            "flags": {
+                "asymmetric": False,
+                "irregular_border": False,
+                "colour_variegated": False,
+                "unreliable_morphology": True,
+            },
             "asymmetry": {"value": None, "reliable": False, "method": "n/a"},
             "border_irregularity": {
                 "value": None, "reliable": False,
@@ -684,6 +706,8 @@ def analyze_lesion(image: Any) -> dict:
         result = _failure("Segmentation unreliable — see limitations.")
         result["segmentation"] = seg_result
         result["limitations"] = limitations
+        result["evidence"] = limitations
+        result["error"] = limitations[0] if limitations else "Segmentation unreliable"
         return result
 
     seg_result["success"] = True
@@ -755,8 +779,27 @@ def analyze_lesion(image: Any) -> dict:
         "NOT a validated clinical risk score or diagnosis."
     )
 
+    # --- Contract aliases for A5 Safety & A6 Coordinator ---
+    is_reliable = (reliability != "LOW")
+    primary_error = limitations[0] if (not is_reliable and limitations) else None
+
+    flags = {
+        "asymmetric": bool(asym_value is not None and asym_value > 0.35),
+        "irregular_border": bool(irreg_value is not None and irreg_value > 0.35),
+        "colour_variegated": bool(var_value is not None and var_value > 0.35),
+        "unreliable_morphology": not is_reliable,
+    }
+    for feat in struct_features:
+        feat_clean = feat.replace("_candidate", "")
+        flags[feat_clean] = True
+
     return {
         "schema_version": SCHEMA_VERSION,
+        "reliable": is_reliable,
+        "error": primary_error,
+        "features": struct_features,
+        "evidence": limitations,
+        "flags": flags,
         "asymmetry": {
             "value": round(asym_value, 4) if asym_value is not None else None,
             "reliable": asym_reliable,
