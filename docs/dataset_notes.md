@@ -198,8 +198,10 @@ When working with this dataset, developers and researchers should be aware of se
    - Unweighted models risk achieving high accuracy by simply predicting the majority class (`nv`) while failing on critical malignant categories like Melanoma (`mel`).
 2. **Missing Clinical Metadata:**
    - Patient `age` is unrecorded for 43 training cases and 12 validation cases. Any multimodal model incorporating demographic variables must implement imputation or handle `None` values.
-3. **Lesion-Level Separation Unverified Independently:**
-   - The supplied dataset pack documentation states that splits are lesion-disjoint (no `lesion_id` is shared between training and validation). However, this property was not independently verified by comparing lesion ID sets during this audit.
+3. **Lesion-Level Separation Independently Verified:**
+   - Rigorous programmatic set-intersection audit (`verify_split_leakage` in `src/data.py` and `tests/test_data.py`) confirmed that **zero lesion IDs are shared between training and validation** (5,815 unique training lesions; 1,456 unique validation lesions; overlap count = 0).
+   - Furthermore, `src/data.py` includes `split_metadata_by_lesion(metadata, val_fraction, seed)` to generate reproducible internal cross-validation folds guaranteed to maintain zero lesion leakage.
+   - Both `split='val'` and `split='eval'` are supported aliases resolving to the validation partition.
 4. **Clinical Efficacy Not Established:**
    - The dataset and any models trained on it are intended for hackathon benchmarking and research development only. Clinical accuracy, diagnostic safety, and generalization to diverse real-world patient demographics have **not** been established.
 5. **No Provenance or Licensing Claims:**

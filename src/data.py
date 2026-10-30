@@ -18,6 +18,7 @@ Responsibilities:
 
 from __future__ import annotations
 
+import random
 import re
 from pathlib import Path
 from typing import Any, Iterator, Optional, Union
@@ -65,7 +66,19 @@ REQUIRED_COLUMNS: list[str] = [
     "localization",
 ]
 
-VALID_SPLITS: tuple[str, str] = ("train", "val")
+VALID_SPLITS: tuple[str, ...] = ("train", "val", "eval")
+
+
+def _resolve_split(split: str) -> str:
+    """Normalize and validate dataset split name, mapping 'eval' to 'val'."""
+    if not isinstance(split, str):
+        raise ValueError(f"Split must be a string, got {type(split).__name__}.")
+    s = split.strip().lower()
+    if s not in VALID_SPLITS:
+        raise ValueError(
+            f"Invalid split '{split}'. Expected one of {VALID_SPLITS}."
+        )
+    return "val" if s == "eval" else s
 
 # Legitimate image IDs: alphanumeric, underscores, hyphens (e.g. 'ISIC_0027419')
 VALID_IMAGE_ID_PATTERN = re.compile(r"^[a-zA-Z0-9_\-]+$")
@@ -172,14 +185,10 @@ def get_image_path(
         ValueError: If split is invalid, image_id is unsafe/malformed, or path escapes images dir.
         FileNotFoundError: If the resolved image file does not exist on disk.
     """
-    if split not in VALID_SPLITS:
-        raise ValueError(
-            f"Invalid split '{split}'. Expected one of {VALID_SPLITS}."
-        )
-
+    split_norm = _resolve_split(split)
     clean_id = validate_image_id(image_id)
     resolved_data_dir = _resolve_data_dir(data_dir)
-    images_dir = (resolved_data_dir / split / "images").resolve()
+    images_dir = (resolved_data_dir / split_norm / "images").resolve()
     image_path = (images_dir / f"{clean_id}.jpg").resolve()
 
     # Ensure resolved path remains strictly within the intended partition directory
@@ -224,14 +233,10 @@ def load_metadata(
             "Please ensure it is installed from requirements.txt."
         )
 
-    if split not in VALID_SPLITS:
-        raise ValueError(
-            f"Invalid split '{split}'. Expected one of {VALID_SPLITS}."
-        )
-
+    split_norm = _resolve_split(split)
     resolved_data_dir = _resolve_data_dir(data_dir)
-    csv_path = resolved_data_dir / split / "metadata.csv"
-    images_dir = (resolved_data_dir / split / "images").resolve()
+    csv_path = resolved_data_dir / split_norm / "metadata.csv"
+    images_dir = (resolved_data_dir / split_norm / "images").resolve()
 
     if not csv_path.is_file():
         raise FileNotFoundError(
@@ -307,6 +312,108 @@ def load_metadata(
     return df
 
 
+def split_metadata_by_lesion(
+    metadata: pd.DataFrame,
+    val_fraction: float = 0.2,
+    seed: int = 42,
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Partition metadata into train and validation subsets grouped strictly by lesion_id.
+
+    Prevents data leakage by ensuring that all images belonging to the same lesion_id
+    are placed exclusively into one partition.
+
+    Args:
+        metadata: Input DataFrame containing at minimum 'lesion_id' and 'image_id'.
+        val_fraction: Target proportion of unique lesions to assign to validation (0.0 < val_fraction < 1.0).
+        seed: Random seed for deterministic, reproducible splitting.
+
+    Returns:
+        Tuple of (train_df, val_df), both reset-indexed.
+
+    Raises:
+        ValueError: If metadata is empty, missing 'lesion_id', or val_fraction is invalid.
+    """
+    if pd is None:
+        raise ImportError("pandas is required for split_metadata_by_lesion.")
+
+    if not isinstance(metadata, pd.DataFrame):
+        raise TypeError(f"metadata must be a pandas DataFrame, got {type(metadata).__name__}.")
+
+    if len(metadata) == 0:
+        raise ValueError("Cannot split an empty metadata DataFrame.")
+
+    if "lesion_id" not in metadata.columns:
+        raise ValueError("Metadata DataFrame must contain a 'lesion_id' column.")
+
+    if not (0.0 < val_fraction < 1.0):
+        raise ValueError(f"val_fraction must be between 0.0 and 1.0 (exclusive), got {val_fraction}.")
+
+    # Deterministic shuffling of unique lesions
+    unique_lesions = sorted(metadata["lesion_id"].astype(str).unique())
+    rng = random.Random(seed)
+    shuffled_lesions = list(unique_lesions)
+    rng.shuffle(shuffled_lesions)
+
+    n_val_lesions = max(1, int(round(len(shuffled_lesions) * val_fraction)))
+    val_lesion_set = set(shuffled_lesions[:n_val_lesions])
+    train_lesion_set = set(shuffled_lesions[n_val_lesions:])
+
+    if not train_lesion_set and len(unique_lesions) > 1:
+        moved = shuffled_lesions.pop()
+        train_lesion_set.add(moved)
+        val_lesion_set.remove(moved)
+
+    lesion_series = metadata["lesion_id"].astype(str)
+    train_mask = lesion_series.isin(train_lesion_set)
+    val_mask = lesion_series.isin(val_lesion_set)
+
+    train_df = metadata[train_mask].copy().reset_index(drop=True)
+    val_df = metadata[val_mask].copy().reset_index(drop=True)
+
+    # Verification invariant
+    leakage = set(train_df["lesion_id"].astype(str)).intersection(set(val_df["lesion_id"].astype(str)))
+    if leakage:
+        raise RuntimeError(f"Internal split error: found {len(leakage)} overlapping lesion(s)!")
+
+    return train_df, val_df
+
+
+def verify_split_leakage(
+    train_metadata: pd.DataFrame,
+    val_metadata: pd.DataFrame,
+) -> dict[str, Any]:
+    """Verify that train and validation metadata subsets share zero image_ids or lesion_ids.
+
+    Args:
+        train_metadata: Training subset DataFrame.
+        val_metadata: Validation subset DataFrame.
+
+    Returns:
+        Dictionary summarizing leakage verification results.
+    """
+    train_images = set(train_metadata["image_id"].astype(str)) if "image_id" in train_metadata.columns else set()
+    val_images = set(val_metadata["image_id"].astype(str)) if "image_id" in val_metadata.columns else set()
+    img_overlap = train_images.intersection(val_images)
+
+    train_lesions = set(train_metadata["lesion_id"].astype(str)) if "lesion_id" in train_metadata.columns else set()
+    val_lesions = set(val_metadata["lesion_id"].astype(str)) if "lesion_id" in val_metadata.columns else set()
+    lesion_overlap = train_lesions.intersection(val_lesions)
+
+    is_leak_free = (len(img_overlap) == 0) and (len(lesion_overlap) == 0)
+
+    return {
+        "is_leak_free": is_leak_free,
+        "train_samples": len(train_metadata),
+        "val_samples": len(val_metadata),
+        "train_unique_lesions": len(train_lesions),
+        "val_unique_lesions": len(val_lesions),
+        "image_overlap_count": len(img_overlap),
+        "lesion_overlap_count": len(lesion_overlap),
+        "overlapping_images": sorted(list(img_overlap))[:5],
+        "overlapping_lesions": sorted(list(lesion_overlap))[:5],
+    }
+
+
 # -----------------------------------------------------------------------------
 # 3. DermaGuardDataset (Framework-Independent Abstraction)
 # -----------------------------------------------------------------------------
@@ -339,19 +446,15 @@ class DermaGuardDataset:
             data_dir: Root data directory path.
             metadata: Pre-loaded DataFrame (optional). If None, loads from disk.
         """
-        if split not in VALID_SPLITS:
-            raise ValueError(
-                f"Invalid split '{split}'. Expected one of {VALID_SPLITS}."
-            )
-
-        self.split: str = split
+        split_norm = _resolve_split(split)
+        self.split: str = split_norm
         self.data_dir: Path = _resolve_data_dir(data_dir)
-        self.images_dir: Path = (self.data_dir / split / "images").resolve()
+        self.images_dir: Path = (self.data_dir / split_norm / "images").resolve()
 
         if metadata is not None:
             self.df: pd.DataFrame = self._validate_and_prepare_metadata(metadata)
         else:
-            self.df = load_metadata(split=split, data_dir=self.data_dir).reset_index(drop=True)
+            self.df = load_metadata(split=split_norm, data_dir=self.data_dir).reset_index(drop=True)
 
     def _validate_and_prepare_metadata(
         self, metadata: pd.DataFrame
