@@ -1,0 +1,61 @@
+{
+  "accuracy": 0.7975,
+  "balanced_accuracy": 0.7995,
+  "macro_f1": 0.6428,
+  "per_class": {
+    "akiec": {
+      "precision": 0.4486,
+      "recall": 0.8,
+      "f1": 0.5749,
+      "support": 60
+    },
+    "bcc": {
+      "precision": 0.5163,
+      "recall": 0.79,
+      "f1": 0.6245,
+      "support": 100
+    },
+    "bkl": {
+      "precision": 0.7033,
+      "recall": 0.7864,
+      "f1": 0.7425,
+      "support": 220
+    },
+    "df": {
+      "precision": 0.3333,
+      "recall": 0.8333,
+      "f1": 0.4762,
+      "support": 30
+    },
+    "mel": {
+      "precision": 0.7522,
+      "recall": 0.7864,
+      "f1": 0.7689,
+      "support": 220
+    },
+    "nv": {
+      "precision": 0.9675,
+      "recall": 0.8007,
+      "f1": 0.8763,
+      "support": 1340
+    },
+    "vasc": {
+      "precision": 0.3,
+      "recall": 0.8,
+      "f1": 0.4364,
+      "support": 30
+    }
+  },
+  "quality_summary": {
+    "PASS": 1652,
+    "WARN": 268,
+    "FAIL": 80,
+    "top_reasons": [
+      "partial_hair_obstruction",
+      "slight_blur",
+      "uneven_illumination",
+      "mild_glare",
+      "severe_blur"
+    ]
+  }
+}
