@@ -32,7 +32,7 @@ except ImportError:
 
 from src.safety_agent import MALIGNANT_CLASSES, BENIGN_CLASSES, audit_safety
 
-POLICY_VERSION: str = "v2.1.0-clinical-safety"
+POLICY_VERSION: str = "1.0"
 
 ALLOWED_DECISIONS: List[str] = ["AUTO-TRIAGE", "RE-IMAGE", "REFER"]
 SUBMISSION_COLUMNS: List[str] = ["image_id", "predicted_label", "decision"]
@@ -208,12 +208,22 @@ def coordinate_triage(agent_outputs: Dict[str, Any]) -> Dict[str, Any]:
     if missing_ev:
         rationale.append(f"Missing clinical metadata noted: {'; '.join(missing_ev)}")
 
-    # Build structured evidence payload
+    # Build structured evidence payload with complete 5-agent traceability
     agent_evidence = {
         "a1_quality_status": q_status or "UNKNOWN",
+        "a1_score": a1.get("score") if a1.get("score") is not None else a1.get("quality_score"),
+        "a2_predicted_class": predicted_label,
         "a2_confidence": a2.get("confidence"),
-        "a3_morphology_flags": [k for k, v in a3.items() if bool(v)] if isinstance(a3, dict) else [],
-        "a4_missing_fields": [m for m in missing_ev if "patient context" in m],
+        "a3_reliability": a3.get("reliability"),
+        "a3_morphology_flags": (
+            list(a3.get("flags", {}).keys())
+            if isinstance(a3.get("flags"), dict)
+            else [k for k, v in a3.items() if bool(v)] if isinstance(a3, dict) else []
+        ),
+        "a4_context_flags": a4.get("context_flags", []),
+        "a4_missing_fields": a4.get("missing_fields", []) or [m for m in missing_ev if "patient context" in m],
+        "a5_safety_flag": a5.get("safety_flag", False),
+        "a5_veto": a5.get("veto_auto_triage", False),
         "a5_risk_level": a5.get("risk_level", "UNKNOWN"),
     }
 
@@ -223,10 +233,14 @@ def coordinate_triage(agent_outputs: Dict[str, Any]) -> Dict[str, Any]:
         "requires_review": requires_review,
         "rationale": rationale,
         "agent_evidence": agent_evidence,
+        "trace": agent_evidence,
         "policy_version": POLICY_VERSION,
     }
 
 
+# Convenience function aliases for cross-module caller compatibility
+coordinate = coordinate_triage
+triage_case = coordinate_triage
 # ==============================================================================
 # SUBMISSION CSV GENERATION & VALIDATION (TASK 5)
 # ==============================================================================
