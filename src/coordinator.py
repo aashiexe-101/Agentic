@@ -241,8 +241,6 @@ def coordinate_triage(agent_outputs: Dict[str, Any]) -> Dict[str, Any]:
 # Convenience function aliases for cross-module caller compatibility
 coordinate = coordinate_triage
 triage_case = coordinate_triage
-
-
 # ==============================================================================
 # SUBMISSION CSV GENERATION & VALIDATION (TASK 5)
 # ==============================================================================
