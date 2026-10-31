@@ -57,6 +57,8 @@ def _is_missing(val: Any) -> bool:
     """Check whether a clinical field value represents missing/null data."""
     if val is None:
         return True
+    if isinstance(val, bool):
+        return True
     if isinstance(val, (int, float)):
         return math.isnan(val)
     s = str(val).strip().lower()
@@ -115,83 +117,130 @@ def evaluate_context(metadata: Optional[dict[str, Any]] = None) -> dict[str, Any
             "and strictly quarantined; context agent evaluates demographics only."
         )
 
-    # 2. Extract and Normalize Age
-    raw_age = None
+    # 2. Extract and Normalize Age (supporting aliases, fallback, and conflict detection)
+    age_candidates: list[tuple[str, float]] = []
+    age_invalid_notes: list[str] = []
+
     for age_key in ("age", "patient_age", "patientAge"):
         if age_key in metadata:
             raw_age = metadata[age_key]
-            break
+            if isinstance(raw_age, bool):
+                age_invalid_notes.append(
+                    f"Recorded age alias '{age_key}' has boolean value '{raw_age}', which is invalid; ignored."
+                )
+                continue
+            if _is_missing(raw_age):
+                continue
+            try:
+                val = float(raw_age)
+                if math.isnan(val) or math.isinf(val) or val < 0.0 or val > 125.0:
+                    age_invalid_notes.append(
+                        f"Recorded age value '{raw_age}' is out of clinical range [0, 125]; marked missing."
+                    )
+                else:
+                    age_candidates.append((age_key, round(val, 1)))
+            except (ValueError, TypeError):
+                age_invalid_notes.append(
+                    f"Recorded age '{raw_age}' could not be parsed as a number; marked missing."
+                )
 
     parsed_age: Optional[float] = None
-    if _is_missing(raw_age):
+    distinct_ages = {v for _, v in age_candidates}
+    if len(distinct_ages) > 1:
+        conflict_desc = ", ".join(f"{k}={v}" for k, v in age_candidates)
+        notes.append(
+            f"Conflict / discrepancy detected across multiple age aliases ({conflict_desc}); "
+            "safely marked age as missing due to conflicting values."
+        )
         missing_fields.append("age")
+    elif len(distinct_ages) == 1:
+        parsed_age = distinct_ages.pop()
+        notes.append(f"Patient age recorded: {parsed_age} years.")
+        if parsed_age < 18.0:
+            context_flags.append("PEDIATRIC_PATIENT")
+            notes.append("Observation: Pediatric patient (<18 yr).")
+        elif parsed_age >= 65.0:
+            context_flags.append("GERIATRIC_PATIENT")
+            notes.append("Observation: Geriatric patient (>=65 yr).")
     else:
-        try:
-            val = float(raw_age)
-            if math.isnan(val) or val < 0.0 or val > 125.0:
-                missing_fields.append("age")
-                notes.append(f"Recorded age value '{raw_age}' is out of clinical range [0, 125]; marked missing.")
-            else:
-                parsed_age = round(val, 1)
-                notes.append(f"Patient age recorded: {parsed_age} years.")
-                if parsed_age < 18.0:
-                    context_flags.append("PEDIATRIC_PATIENT")
-                    notes.append("Observation: Pediatric patient (<18 yr).")
-                elif parsed_age >= 65.0:
-                    context_flags.append("GERIATRIC_PATIENT")
-                    notes.append("Observation: Geriatric patient (>=65 yr).")
-        except (ValueError, TypeError):
-            missing_fields.append("age")
-            notes.append(f"Recorded age '{raw_age}' could not be parsed as a number; marked missing.")
+        missing_fields.append("age")
+        for inv_note in age_invalid_notes:
+            notes.append(inv_note)
 
-    # 3. Extract and Normalize Sex
-    raw_sex = None
+    # 3. Extract and Normalize Sex (supporting aliases, fallback, and conflict detection)
+    sex_candidates: list[tuple[str, str]] = []
+    sex_unconfirmed_notes: list[str] = []
+
     for sex_key in ("sex", "gender", "patient_sex", "patientGender"):
         if sex_key in metadata:
             raw_sex = metadata[sex_key]
-            break
+            if isinstance(raw_sex, bool) or _is_missing(raw_sex):
+                continue
+            s_str = str(raw_sex).strip().lower()
+            if s_str in ("m", "male"):
+                sex_candidates.append((sex_key, "male"))
+            elif s_str in ("f", "female"):
+                sex_candidates.append((sex_key, "female"))
+            elif s_str in ("other", "non-binary", "intersex"):
+                sex_candidates.append((sex_key, s_str))
+            else:
+                sex_unconfirmed_notes.append(
+                    f"Recorded sex value '{raw_sex}' unconfirmed; marked missing."
+                )
 
     parsed_sex: Optional[str] = None
-    if _is_missing(raw_sex):
+    distinct_sexes = {v for _, v in sex_candidates}
+    if len(distinct_sexes) > 1:
+        conflict_desc = ", ".join(f"{k}={v}" for k, v in sex_candidates)
+        notes.append(
+            f"Conflict / discrepancy detected across multiple sex aliases ({conflict_desc}); "
+            "safely marked sex as missing due to conflicting values."
+        )
         missing_fields.append("sex")
-    else:
-        s_str = str(raw_sex).strip().lower()
-        if s_str in ("m", "male"):
-            parsed_sex = "male"
-            notes.append("Recorded biological/clinical sex: male.")
-        elif s_str in ("f", "female"):
-            parsed_sex = "female"
-            notes.append("Recorded biological/clinical sex: female.")
-        elif s_str in ("other", "non-binary", "intersex"):
-            parsed_sex = s_str
-            notes.append(f"Recorded sex value: {parsed_sex}.")
+    elif len(distinct_sexes) == 1:
+        parsed_sex = distinct_sexes.pop()
+        if parsed_sex in ("male", "female"):
+            notes.append(f"Recorded biological/clinical sex: {parsed_sex}.")
         else:
-            missing_fields.append("sex")
-            notes.append(f"Recorded sex value '{raw_sex}' unconfirmed; marked missing.")
+            notes.append(f"Recorded sex value: {parsed_sex}.")
+    else:
+        missing_fields.append("sex")
+        for u_note in sex_unconfirmed_notes:
+            notes.append(u_note)
 
-    # 4. Extract and Normalize Anatomical Localization
-    raw_loc = None
+    # 4. Extract and Normalize Anatomical Localization (supporting aliases, fallback, and conflict detection)
+    loc_candidates: list[tuple[str, str]] = []
+
     for loc_key in ("localization", "site", "anatomical_site", "anatomical_localization"):
         if loc_key in metadata:
             raw_loc = metadata[loc_key]
-            break
+            if isinstance(raw_loc, bool) or _is_missing(raw_loc):
+                continue
+            l_str = str(raw_loc).strip().lower()
+            if l_str in ("unknown", "not reported", "?"):
+                continue
+            loc_candidates.append((loc_key, l_str))
 
     parsed_loc: Optional[str] = None
-    if _is_missing(raw_loc):
+    distinct_locs = {v for _, v in loc_candidates}
+    if len(distinct_locs) > 1:
+        conflict_desc = ", ".join(f"{k}={v}" for k, v in loc_candidates)
+        notes.append(
+            f"Conflict / discrepancy detected across multiple localization aliases ({conflict_desc}); "
+            "safely marked localization as missing due to conflicting values."
+        )
         missing_fields.append("localization")
+    elif len(distinct_locs) == 1:
+        parsed_loc = distinct_locs.pop()
+        notes.append(f"Anatomical site recorded: {parsed_loc}.")
+        if parsed_loc in ("face", "scalp", "ear", "neck"):
+            context_flags.append("HEAD_NECK_SITE")
+        elif parsed_loc in ("acral", "hand", "foot"):
+            context_flags.append("ACRAL_SITE")
+        elif parsed_loc in ("genital",):
+            context_flags.append("GENITAL_SITE")
     else:
-        l_str = str(raw_loc).strip().lower()
-        if l_str in ("unknown", "not reported", "?"):
-            missing_fields.append("localization")
-        else:
-            parsed_loc = l_str
-            notes.append(f"Anatomical site recorded: {parsed_loc}.")
-            if parsed_loc in ("face", "scalp", "ear", "neck"):
-                context_flags.append("HEAD_NECK_SITE")
-            elif parsed_loc in ("acral", "hand", "foot"):
-                context_flags.append("ACRAL_SITE")
-            elif parsed_loc in ("genital",):
-                context_flags.append("GENITAL_SITE")
+        missing_fields.append("localization")
 
     # 5. Summarize Completeness Flags
     if len(missing_fields) == 3:

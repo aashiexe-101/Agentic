@@ -211,3 +211,21 @@ All specifications detailed in this contract are verified continuously via `test
 - `test_demographic_age_ranges`: Checks `<18`, `>=65`, `<0`, `>125` thresholds.
 - `test_sex_normalization`: Tests biological sex normalization.
 - `test_anatomical_site_normalization`: Tests site categorization and clinical flags.
+
+---
+
+## 9. HAM10000 Metadata Audit
+
+A second-stage read-only audit of the local HAM10000 dataset evaluated through `evaluate_context()` confirmed the demographic context profile across partitions:
+
+- **Dataset Size**: **7,762** training records and **1,942** validation records (**9,704** total records across `data/train/metadata.csv` and `data/val/metadata.csv`).
+- **Context Completeness**:
+  - **Complete Context (`CONTEXT_COMPLETE`)**: **9,457** records (**97.45%**) have full demographic context (valid age, sex, and anatomical localization).
+  - **Incomplete Context (`INCOMPLETE_CONTEXT`)**: **202** records (**2.08%**) have partial context with exactly one field missing.
+  - **All Context Missing (`ALL_CONTEXT_MISSING`)**: **45** records (**0.46%**) have all three demographic fields missing or unknown.
+- **Localization-Only Missingness**:
+  - Localization is the predominant contributor to incomplete context, representing 182 training records and 33 validation records (182 records with localization-only missingness across the combined dataset; 149 training and 33 validation).
+- **Missingness Pattern Invariant**:
+  - **No records have exactly two missing fields**: Across the entire 9,704 instances, pairwise missingness is zero (age+sex, age+localization, and sex+localization are all 0). Records strictly possess either 0, 1, or all 3 missing demographic fields.
+- **Ground-Truth Isolation**:
+  - `dx` and any other ground-truth diagnostic labels were strictly excluded from Agent A4 inputs, upholding complete decoupling between patient demographic context and diagnostic classification.
