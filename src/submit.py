@@ -35,6 +35,8 @@ from src.data import CLASS_LABELS, validate_image_id
 
 # Canonical 3-column schema specified for official submission
 SUBMISSION_COLUMNS: list[str] = ["image_id", "predicted_label", "decision"]
+SUBMISSION_COLUMNS_ALT: list[str] = ["image_id", "prediction", "decision"]
+VALID_SUBMISSION_HEADERS: list[list[str]] = [SUBMISSION_COLUMNS, SUBMISSION_COLUMNS_ALT]
 
 # Allowed decision categories based on Level 2 Triage Contract
 VALID_DECISIONS: tuple[str, ...] = ("AUTO-TRIAGE", "REFER", "RE-IMAGE")
@@ -57,9 +59,13 @@ def normalize_decision(decision: Any) -> str:
 
 def validate_submission_record(
     image_id: Any,
-    predicted_label: Any,
-    decision: Any,
+    predicted_label: Any = None,
+    decision: Any = None,
+    *,
+    prediction: Any = None,
 ) -> dict[str, str]:
+    if predicted_label is None and prediction is not None:
+        predicted_label = prediction
     """Validate a single submission row record.
 
     Args:
@@ -91,6 +97,7 @@ def validate_submission_record(
     return {
         "image_id": clean_id,
         "predicted_label": clean_label,
+        "prediction": clean_label,
         "decision": clean_decision,
     }
 
@@ -132,10 +139,10 @@ def validate_submission_file(csv_path: Union[str, Path]) -> list[dict[str, str]]
             raise ValueError(f"Submission file '{path.name}' is empty.")
 
         clean_header = [col.strip() for col in header]
-        if clean_header != SUBMISSION_COLUMNS:
+        if clean_header not in VALID_SUBMISSION_HEADERS:
             raise ValueError(
                 f"Invalid submission CSV header in '{path.name}': {clean_header}. "
-                f"Expected exactly: {SUBMISSION_COLUMNS}"
+                f"Expected one of: {SUBMISSION_COLUMNS} or {SUBMISSION_COLUMNS_ALT}"
             )
 
         for row_idx, row in enumerate(reader, start=2):
@@ -175,12 +182,14 @@ def validate_submission_file(csv_path: Union[str, Path]) -> list[dict[str, str]]
 def write_submission_csv(
     records: list[dict[str, str]],
     output_path: Union[str, Path] = "outputs/submission.csv",
+    prediction_column: str = "predicted_label",
 ) -> Path:
     """Safely serialize validated records to the official submission CSV format.
 
     Args:
-        records: List of record dictionaries with keys 'image_id', 'predicted_label', 'decision'.
+        records: List of record dictionaries with keys 'image_id', 'predicted_label'/'prediction', 'decision'.
         output_path: Target CSV file path.
+        prediction_column: Name of prediction column ('predicted_label' or 'prediction').
 
     Returns:
         Path to the verified output file.
@@ -191,23 +200,30 @@ def write_submission_csv(
     out_p = Path(output_path).resolve()
     out_p.parent.mkdir(parents=True, exist_ok=True)
 
+    header = ["image_id", prediction_column, "decision"]
+
     # Validate before writing
     clean_records = []
     seen = set()
     for idx, r in enumerate(records):
+        val = r.get("predicted_label") if r.get("predicted_label") is not None else r.get("prediction")
         clean = validate_submission_record(
             r.get("image_id"),
-            r.get("predicted_label"),
+            val,
             r.get("decision"),
         )
         img_id = clean["image_id"]
         if img_id in seen:
             raise ValueError(f"Duplicate image_id '{img_id}' encountered at record index {idx}.")
         seen.add(img_id)
-        clean_records.append(clean)
+        clean_records.append({
+            "image_id": clean["image_id"],
+            prediction_column: clean["predicted_label"],
+            "decision": clean["decision"],
+        })
 
     with open(out_p, "w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=SUBMISSION_COLUMNS)
+        writer = csv.DictWriter(f, fieldnames=header)
         writer.writeheader()
         for r in clean_records:
             writer.writerow(r)

@@ -136,6 +136,24 @@ def test_header_format_strictness():
             assert "header" in str(e).lower()
 
 
+def test_prediction_alias_header_supported():
+    """Verify that both 'prediction' and 'predicted_label' headers are valid."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        # Test brief format: image_id,prediction,decision
+        out_csv = Path(tmpdir) / "brief_format.csv"
+        with open(out_csv, "w", encoding="utf-8") as f:
+            f.write("image_id,prediction,decision\n")
+            f.write("ISIC_0024306,mel,REFER\n")
+            f.write("ISIC_0024307,nv,AUTO-TRIAGE\n")
+
+        records = validate_submission_file(out_csv)
+        assert len(records) == 2
+        assert records[0]["image_id"] == "ISIC_0024306"
+        assert records[0]["predicted_label"] == "mel"
+        assert records[0]["prediction"] == "mel"
+        assert records[0]["decision"] == "REFER"
+        assert records[1]["decision"] == "AUTO-TRIAGE"
+
 def test_submit_to_portal_safety_gate():
     """Verify safety gate blocks unconfirmed submissions."""
     with tempfile.TemporaryDirectory() as tmpdir:

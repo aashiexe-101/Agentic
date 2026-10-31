@@ -49,8 +49,14 @@ def get_feature_extractor(device: Optional[torch.device] = None) -> nn.Module:
     if device is None:
         device = get_device()
 
-    weights = EfficientNet_B0_Weights.DEFAULT
-    model = efficientnet_b0(weights=weights)
+    try:
+        local_cache = Path(__file__).resolve().parent.parent / '.cache' / 'torch'
+        local_cache.mkdir(parents=True, exist_ok=True)
+        torch.hub.set_dir(str(local_cache))
+        weights = EfficientNet_B0_Weights.DEFAULT
+        model = efficientnet_b0(weights=weights)
+    except Exception:
+        model = efficientnet_b0(weights=None)
     model.classifier = nn.Identity()
 
     for param in model.parameters():

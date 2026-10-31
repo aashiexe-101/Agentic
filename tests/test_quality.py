@@ -66,19 +66,20 @@ def _make_normal_image(seed: int = 0, h: int = 300, w: int = 300) -> np.ndarray:
     """
     Produce a well-lit, sharp, unobstructed synthetic BGR image.
 
-    Strategy: uniform random pixel values in [100, 180] + a checkerboard
-    pattern to guarantee high-frequency edges and therefore a high Laplacian
-    variance (well above BLUR_WARN_THRESHOLD).
+    Strategy: uniform base in [130, 150] with large geometric high-contrast
+    features to guarantee high Laplacian variance (sharp edges) without
+    triggering morphological hair-occlusion filters.
     """
     rng = np.random.RandomState(seed)
-    base = rng.randint(100, 180, (h, w, 3), dtype=np.uint8)
+    base = np.full((h, w, 3), 140, dtype=np.uint8)
+    noise = rng.randint(-10, 10, (h, w, 3), dtype=np.int16)
+    base = np.clip(base.astype(np.int16) + noise, 0, 255).astype(np.uint8)
 
-    # Inject a sharp 8×8 checkerboard to guarantee strong Laplacian edges
-    tile = np.zeros((8, 8), dtype=np.uint8)
-    tile[0::2, 0::2] = 60
-    tile[1::2, 1::2] = 60
-    checker = np.tile(tile, (h // 8 + 1, w // 8 + 1))[:h, :w]
-    base[:, :, 0] = np.clip(base[:, :, 0].astype(np.int16) + checker, 0, 255).astype(np.uint8)
+    # Large high-contrast shapes to produce high Laplacian variance
+    cv2.circle(base, (w // 2, h // 2), min(h, w) // 4, (40, 40, 40), -1)
+    cv2.circle(base, (w // 2, h // 2), min(h, w) // 8, (200, 200, 200), -1)
+    cv2.rectangle(base, (w // 10, h // 10), (w // 4, h // 4), (60, 60, 60), -1)
+    cv2.rectangle(base, (3 * w // 4, 3 * h // 4), (9 * w // 10, 9 * h // 10), (60, 60, 60), -1)
 
     return base
 

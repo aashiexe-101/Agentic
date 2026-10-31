@@ -57,5 +57,19 @@
       "above FAIL threshold 10.85%)",
       "above WARN threshold 192.35)"
     ]
+  },
+  "correct_auto_triage_count": 662,
+  "incorrect_auto_triage_count": 22,
+  "refer_count": 1236,
+  "reimage_count": 80,
+  "auto_triage_accuracy": 0.9678,
+  "triage_performance": {
+    "total_cases": 2000,
+    "auto_triage_count": 684,
+    "correct_auto_triage_count": 662,
+    "incorrect_auto_triage_count": 22,
+    "refer_count": 1236,
+    "reimage_count": 80,
+    "auto_triage_accuracy": 0.9678
   }
 }
